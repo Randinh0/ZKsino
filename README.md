@@ -1,6 +1,6 @@
-# ZKsino Beta - Flip Coin Simple
+# ZKsino - Casino Descentralizado
 
-Una aplicación de casino descentralizada simple que permite apostar en un juego de cara o cruz usando contratos inteligentes.
+Una aplicación de casino descentralizada que permite apostar en un juego de cara o cruz usando contratos inteligentes.
 
 ## 🎯 Características
 
@@ -18,8 +18,8 @@ Una aplicación de casino descentralizada simple que permite apostar en un juego
 ### Instalación
 ```bash
 # Clonar el repositorio
-git clone <tu-repo>
-cd ZKsino_beta
+git clone https://github.com/Randinh0/ZKsino.git
+cd ZKsino
 
 # Instalar dependencias
 npm install
@@ -70,7 +70,7 @@ npm run deploy
 ## 📋 Estructura del Proyecto
 
 ```
-ZKsino_beta/
+ZKsino/
 ├── contracts/
 │   └── FlipCoinSimple.sol      # Contrato principal
 ├── scripts/
@@ -81,7 +81,7 @@ ZKsino_beta/
 │   ├── index.html              # Interfaz web
 │   └── app.js                  # Lógica JavaScript
 ├── hardhat.config.js           # Configuración de Hardhat
-├── start-demo.sh              # Script de demostración
+├── demo-complete.sh            # Script de demostración
 └── package.json               # Dependencias y scripts
 ```
 
