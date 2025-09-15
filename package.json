@@ -10,7 +10,8 @@
     "deploy:localhost": "npx hardhat run scripts/deploy.js --network localhost",
     "node": "npx hardhat node",
     "start": "npx hardhat node --hostname 0.0.0.0",
-    "serve": "node serve-frontend.js"
+    "generate-verifier": "node scripts/generate-verifier.js",
+    "zk:full": "npm run generate-verifier && npm run compile && npm run test"
   },
   "keywords": [],
   "author": "",
