@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZKsino - Flip Coin Simple</title>
+    <script src="https://cdn.ethers.io/lib/ethers-5.7.2.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            max-width: 500px;
+            width: 90%;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 2.5rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .section {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: bold;
+        }
+
+        input, button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            margin-bottom: 1rem;
+        }
+
+        input {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        input::placeholder {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            border: none;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .status.success {
+            background: rgba(46, 204, 113, 0.3);
+            border: 1px solid rgba(46, 204, 113, 0.5);
+        }
+
+        .status.error {
+            background: rgba(231, 76, 60, 0.3);
+            border: 1px solid rgba(231, 76, 60, 0.5);
+        }
+
+        .status.info {
+            background: rgba(52, 152, 219, 0.3);
+            border: 1px solid rgba(52, 152, 219, 0.5);
+        }
+
+        .bet-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1rem;
+            border-radius: 10px;
+            margin-top: 1rem;
+        }
+
+        .coin {
+            font-size: 4rem;
+            text-align: center;
+            margin: 1rem 0;
+            animation: flip 1s ease-in-out;
+        }
+
+        @keyframes flip {
+            0% { transform: rotateY(0deg); }
+            50% { transform: rotateY(180deg); }
+            100% { transform: rotateY(0deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .wallet-info {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎰 ZKsino Flip Coin</h1>
+        
+        <div id="walletSection" class="section">
+            <div class="wallet-info">
+                <h3>Conectar Wallet</h3>
+                <button id="connectWallet">Conectar MetaMask</button>
+                <div id="walletInfo" class="hidden">
+                    <p>Dirección: <span id="walletAddress"></span></p>
+                    <p>Balance: <span id="walletBalance"></span> ETH</p>
+                </div>
+            </div>
+        </div>
+
+        <div id="gameSection" class="section hidden">
+            <div class="section">
+                <label for="betAmount">Cantidad a apostar (ETH):</label>
+                <input type="number" id="betAmount" placeholder="0.01" step="0.001" min="0.001">
+            </div>
+
+            <div class="section">
+                <label for="clientNonce">Nonce (número aleatorio):</label>
+                <input type="number" id="clientNonce" placeholder="12345">
+                <button onclick="generateNonce()">Generar Nonce Aleatorio</button>
+            </div>
+
+            <button id="placeBet" onclick="placeBet()">🎲 Apostar</button>
+
+            <div id="status" class="status hidden"></div>
+
+            <div id="betResult" class="bet-info hidden">
+                <h3>Resultado de la Apuesta</h3>
+                <div class="coin" id="coinResult">🎲</div>
+                <p id="resultText"></p>
+                <p id="betDetails"></p>
+            </div>
+        </div>
+
+        <div class="section">
+            <h3>Información del Contrato</h3>
+            <p>Contrato: <span id="contractAddress">No desplegado</span></p>
+            <p>House Fee: <span id="houseFee">2%</span></p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

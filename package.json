@@ -1,0 +1,25 @@
+{
+  "name": "zksino_beta",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx hardhat test",
+    "compile": "npx hardhat compile",
+    "deploy": "npx hardhat run scripts/deploy.js",
+    "deploy:localhost": "npx hardhat run scripts/deploy.js --network localhost",
+    "node": "npx hardhat node",
+    "start": "npx hardhat node --hostname 0.0.0.0",
+    "serve": "node serve-frontend.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^3.0.0",
+    "hardhat": "^2.26.3"
+  }
+}
