@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  hardhat:
+    build:
+      context: .
+      dockerfile: Dockerfile.hardhat
+    ports:
+      - "8545:8545"
+    volumes:
+      - ./contracts:/app/contracts
+      - ./test:/app/test
+      - ./scripts:/app/scripts
+      - ./zk_keys:/app/zk_keys
+      - ./artifacts:/app/artifacts
+      - ./cache:/app/cache
+    environment:
+      - NODE_ENV=development
+    command: npx hardhat node --hostname 0.0.0.0
+    networks:
+      - zksino-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - ./temp:/app/temp
+      - ./zk_keys:/app/zk_keys
+      - ./contracts:/app/contracts
+    environment:
+      - REACT_APP_HARDHAT_URL=http://hardhat:8545
+      - REACT_APP_CONTRACT_ADDRESS=
+    depends_on:
+      - hardhat
+    networks:
+      - zksino-network
+
+  zk-generator:
+    build:
+      context: .
+      dockerfile: Dockerfile.zk
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./circuits:/app/circuits
+      - ./scripts:/app/scripts
+      - ./temp:/app/temp
+      - ./zk_keys:/app/zk_keys
+      - ./node_modules:/app/node_modules
+    networks:
+      - zksino-network
+
+networks:
+  zksino-network:
+    driver: bridge

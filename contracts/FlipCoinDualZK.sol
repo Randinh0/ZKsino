@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@chainlink/contracts/src/v0.8/vrf/VRFConsumerBaseV2.sol";
 import "@chainlink/contracts/src/v0.8/vrf/interfaces/VRFCoordinatorV2Interface.sol";
-import "./FlipCoinDualZKVerifier.sol";
+import "./IVerifier.sol";
 
 /**
  * @title FlipCoinDualZK
@@ -43,8 +43,8 @@ contract FlipCoinDualZK is VRFConsumerBaseV2, ReentrancyGuard, Ownable {
     mapping(uint256 => VRFRequest) public vrfRequests;
     mapping(address => uint256) public pendingWithdrawals;
     
-    // Verificador ZK de doble condición
-    FlipCoinDualZKVerifier public immutable dualZKVerifier;
+    // Verificador Groth16 generado por snarkjs (interfaz)
+    IVerifier public immutable verifier;
     
     // VRF
     VRFCoordinatorV2Interface public immutable COORDINATOR;
@@ -73,7 +73,7 @@ contract FlipCoinDualZK is VRFConsumerBaseV2, ReentrancyGuard, Ownable {
         uint256 _houseFee,
         uint256 _minBetAmount,
         uint256 _maxBetAmount,
-        address _dualZKVerifier
+        address _verifier
     ) VRFConsumerBaseV2(_vrfCoordinator) {
         COORDINATOR = VRFCoordinatorV2Interface(_vrfCoordinator);
         keyHash = _keyHash;
@@ -81,7 +81,7 @@ contract FlipCoinDualZK is VRFConsumerBaseV2, ReentrancyGuard, Ownable {
         houseFee = _houseFee;
         minBetAmount = _minBetAmount;
         maxBetAmount = _maxBetAmount;
-        dualZKVerifier = FlipCoinDualZKVerifier(_dualZKVerifier);
+        verifier = IVerifier(_verifier);
     }
     
     // ============ FUNCIONES PRINCIPALES ============
@@ -115,86 +115,114 @@ contract FlipCoinDualZK is VRFConsumerBaseV2, ReentrancyGuard, Ownable {
     }
     
     /**
+     * @dev Crear apuesta con ambos commits en una sola transacción (OPTIMIZADO)
+     * @param _house Dirección de la casa
+     * @param _playerCommit Hash de la preimagen del jugador
+     * @param _houseCommit Hash de la preimagen de la casa
+     */
+    function createBetWithCommits(address _house, bytes32 _playerCommit, bytes32 _houseCommit) external payable nonReentrant {
+        require(_house != address(0) && _house != msg.sender, "Invalid house address");
+        require(_playerCommit != bytes32(0), "Invalid player commit");
+        require(_houseCommit != bytes32(0), "Invalid house commit");
+        require(msg.value >= minBetAmount, "Bet below minimum");
+        require(msg.value <= maxBetAmount, "Bet above maximum");
+        
+        uint256 betId = nextBetId++;
+        
+        // Generar randomIndex automáticamente para testing
+        uint256 randomIndex = uint256(keccak256(abi.encodePacked(
+            betId,
+            msg.sender,
+            _house,
+            block.timestamp,
+            _playerCommit,
+            _houseCommit
+        ))) % 512;
+        
+        bets[betId] = Bet({
+            player: msg.sender,
+            house: _house,
+            amount: msg.value,
+            playerCommit: _playerCommit,
+            houseCommit: _houseCommit,
+            randomIndex: randomIndex,
+            settled: false,
+            timestamp: block.timestamp
+        });
+        
+        emit BetCreated(betId, msg.sender, _house, msg.value);
+        emit HouseCommitted(betId, _house, _houseCommit);
+        emit VRFFulfilled(betId, 0, randomIndex);
+    }
+    
+    /**
      * @dev La casa se compromete con su preimagen
      * @param _betId ID de la apuesta
      * @param _houseCommit Hash de la preimagen de la casa
      */
     function houseCommit(uint256 _betId, bytes32 _houseCommit) external {
         Bet storage bet = bets[_betId];
-        require(bet.house == msg.sender, "Only house can commit");
+        require(bet.house == msg.sender || (bet.house == address(this) && bet.player == msg.sender), "Only house can commit");
         require(bet.houseCommit == bytes32(0), "House already committed");
         require(_houseCommit != bytes32(0), "Invalid house commit");
         
         bet.houseCommit = _houseCommit;
-        emit HouseCommitted(_betId, msg.sender, _houseCommit);
+        emit HouseCommitted(_betId, bet.house, _houseCommit);
         
         // Solicitar VRF para índice aleatorio
         _requestVRF(_betId);
     }
     
     /**
-     * @dev Resolver apuesta con doble condición ZK
+     * @dev Resolver apuesta con prueba ZK Groth16 (puede ser llamada por cualquiera con prueba válida)
      * @param _betId ID de la apuesta
-     * @param _playerPreimage Preimagen del jugador (512 bits = 16 uint32)
-     * @param _housePreimage Preimagen de la casa (512 bits = 16 uint32)
-     * @param _expectedResult Resultado esperado del XOR (0 o 1)
-     * @param _zkProof Prueba ZK de doble condición
+     * @param _pA Prueba A
+     * @param _pB Prueba B
+     * @param _pC Prueba C
+     * @param _pubSignals Señales públicas [playerCommit, houseCommit, bitIndex, expectedResult]
      */
     function settleBetWithDualZK(
         uint256 _betId,
-        uint32[16] calldata _playerPreimage,
-        uint32[16] calldata _housePreimage,
-        uint8 _expectedResult,
-        bytes calldata _zkProof
+        uint[2] calldata _pA,
+        uint[2][2] calldata _pB,
+        uint[2] calldata _pC,
+        uint[4] calldata _pubSignals
     ) external nonReentrant {
         Bet storage bet = bets[_betId];
-        require(bet.player == msg.sender || bet.house == msg.sender, "Only player or house can settle");
+        // Cualquiera puede liquidar con prueba ZK válida (trustless)
+        // require(bet.player == msg.sender || bet.house == msg.sender, "Only player or house can settle");
         require(!bet.settled, "Bet already settled");
         require(bet.randomIndex > 0, "VRF not fulfilled yet");
-        require(_expectedResult <= 1, "Invalid expected result");
-        
-        // Verificar prueba ZK de doble condición
-        require(
-            dualZKVerifier.verifyDualProof(
-                _playerPreimage,
-                bet.playerCommit,
-                _housePreimage,
-                bet.houseCommit,
-                bet.randomIndex,
-                _expectedResult,
-                _zkProof
-            ),
-            "Invalid dual ZK proof"
-        );
-        
+        require(_pubSignals[3] <= 1, "Invalid expected result");
+
+        // Validar señales públicas contra el estado
+        require(_pubSignals[0] == uint256(bet.playerCommit), "Player commit mismatch");
+        require(_pubSignals[1] == uint256(bet.houseCommit), "House commit mismatch");
+        require(_pubSignals[2] == bet.randomIndex, "Bit index mismatch");
+
+        // Verificar prueba Groth16
+        require(verifier.verifyProof(_pA, _pB, _pC, _pubSignals), "Invalid ZK proof");
+
         bet.settled = true;
-        
-        // Calcular bits y resultado
-        uint8 playerBit = _getBitAt(_playerPreimage, bet.randomIndex);
-        uint8 houseBit = _getBitAt(_housePreimage, bet.randomIndex);
-        uint8 result = playerBit ^ houseBit;
-        
-        // Verificar que el resultado coincide con el esperado
-        require(result == _expectedResult, "Result mismatch");
-        
+
+        uint8 result = uint8(_pubSignals[3]);
+
         // Determinar ganador y distribuir fondos
         address winner;
         uint256 payout;
-        
+
         if (result == 1) {
-            // Jugador gana
             winner = bet.player;
-            payout = bet.amount * 2; // Doble de la apuesta
+            payout = bet.amount * 2;
         } else {
-            // Casa gana
             winner = bet.house;
-            payout = bet.amount + (bet.amount * houseFee / 10000); // Apuesta + fee
+            payout = bet.amount + (bet.amount * houseFee / 10000);
         }
-        
-        // Transferir fondos
+
         pendingWithdrawals[winner] += payout;
-        
-        emit BetSettled(_betId, winner, payout, playerBit, houseBit, result);
+
+        // Bits individuales no se exponen; solo el resultado
+        emit BetSettled(_betId, winner, payout, 0, 0, result);
     }
     
     /**
@@ -259,6 +287,18 @@ contract FlipCoinDualZK is VRFConsumerBaseV2, ReentrancyGuard, Ownable {
     }
     
     /**
+     * @dev Solo entorno local: fijar índice aleatorio para pruebas
+     */
+    function setRandomIndexForTest(uint256 _betId, uint256 _index) external {
+        require(block.chainid == 31337 || block.chainid == 1337, "Only in local test");
+        require(_index < 512, "Index out of range");
+        Bet storage bet = bets[_betId];
+        require(bet.player == msg.sender || bet.house == msg.sender || owner() == msg.sender, "Not authorized");
+        bets[_betId].randomIndex = _index;
+        emit VRFFulfilled(_betId, 0, _index);
+    }
+    
+    /**
      * @dev Callback de VRF
      * @param requestId ID de la solicitud VRF
      * @param randomWords Array de números aleatorios
@@ -276,39 +316,17 @@ contract FlipCoinDualZK is VRFConsumerBaseV2, ReentrancyGuard, Ownable {
         emit VRFFulfilled(betId, requestId, randomIndex);
     }
     
-    // ============ FUNCIONES AUXILIARES ============
-    
-    /**
-     * @dev Obtener bit en posición específica de preimagen de 512 bits
-     * @param _preimage Preimagen como array de 16 uint32
-     * @param _position Posición del bit (0-511)
-     * @return Bit en la posición especificada
-     */
-    function _getBitAt(uint32[16] calldata _preimage, uint256 _position) internal pure returns (uint8) {
-        require(_position < 512, "Position out of range");
-        uint256 uint32Index = _position / 32;
-        uint256 bitIndex = _position % 32;
-        return uint8(_preimage[uint32Index] >> bitIndex) & 1;
-    }
+    // ============ FUNCIONES DE LECTURA ============
     
     /**
      * @dev Obtener información de una apuesta
-     * @param _betId ID de la apuesta
-     * @return player Dirección del jugador
-     * @return house Dirección de la casa
-     * @return amount Cantidad de la apuesta
-     * @return playerCommit Commitment del jugador
-     * @return houseCommit Commitment de la casa
-     * @return randomIndex Índice aleatorio del VRF
-     * @return settled Si la apuesta está resuelta
-     * @return timestamp Timestamp de creación
      */
     function getBetInfo(uint256 _betId) external view returns (
         address player,
         address house,
         uint256 amount,
         bytes32 playerCommit,
-        bytes32 houseCommit,
+        bytes32 houseCommitHash,
         uint256 randomIndex,
         bool settled,
         uint256 timestamp

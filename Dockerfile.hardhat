@@ -1,0 +1,24 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Instalar dependencias del sistema
+RUN apk add --no-cache git python3 make g++
+
+# Copiar package.json e instalar dependencias
+COPY package*.json ./
+RUN npm install --legacy-peer-deps
+
+# Copiar código fuente
+COPY . .
+
+# Compilar contratos
+RUN npx hardhat compile
+
+# Script de despliegue automático
+COPY scripts/deploy-local.sh /app/scripts/
+RUN chmod +x /app/scripts/deploy-local.sh
+
+EXPOSE 8545
+
+CMD ["/app/scripts/deploy-local.sh"]

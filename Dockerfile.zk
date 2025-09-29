@@ -1,0 +1,30 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Instalar dependencias del sistema y Rust toolchain
+RUN apk add --no-cache git python3 make g++ bash curl pkgconfig openssl-dev musl-dev libc6-compat && \
+    curl https://sh.rustup.rs -sSf | bash -s -- -y && \
+    /root/.cargo/bin/rustup default stable
+
+# Construir e instalar circom desde fuente
+RUN git clone https://github.com/iden3/circom.git /tmp/circom && \
+    cd /tmp/circom && \
+    /root/.cargo/bin/cargo build --release && \
+    cp target/release/circom /usr/local/bin/circom && \
+    chmod +x /usr/local/bin/circom && \
+    rm -rf /tmp/circom
+
+# Copiar package.json e instalar dependencias
+COPY package*.json ./
+RUN npm install --legacy-peer-deps
+
+# Instalar dependencias ZK con --legacy-peer-deps
+RUN npm install -D snarkjs circomlibjs express --legacy-peer-deps
+
+# Copiar código fuente
+COPY . .
+
+EXPOSE 3001
+
+CMD ["node", "scripts/zk-api.js"]

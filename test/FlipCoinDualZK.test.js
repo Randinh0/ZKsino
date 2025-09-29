@@ -3,7 +3,7 @@ const { ethers } = require("hardhat");
 
 describe("FlipCoinDualZK", function () {
   let flipCoin;
-  let dualZKVerifier;
+  let verifier;
   let owner;
   let player;
   let house;
@@ -19,10 +19,10 @@ describe("FlipCoinDualZK", function () {
   beforeEach(async function () {
     [owner, player, house] = await ethers.getSigners();
 
-    // Desplegar verificador ZK
-    const FlipCoinDualZKVerifier = await ethers.getContractFactory("FlipCoinDualZKVerifier");
-    dualZKVerifier = await FlipCoinDualZKVerifier.deploy();
-    await dualZKVerifier.deployed();
+    // Desplegar verificador (mock para tests de integración)
+    const MockVerifier = await ethers.getContractFactory("MockVerifier");
+    verifier = await MockVerifier.deploy();
+    await verifier.deployed();
 
     // Desplegar contrato principal
     const FlipCoinDualZK = await ethers.getContractFactory("FlipCoinDualZK");
@@ -33,7 +33,7 @@ describe("FlipCoinDualZK", function () {
       HOUSE_FEE,
       MIN_BET,
       MAX_BET,
-      dualZKVerifier.address
+      verifier.address
     );
     await flipCoin.deployed();
   });
@@ -136,7 +136,7 @@ describe("FlipCoinDualZK", function () {
         .withArgs(betId, house.address, houseCommit);
 
       const betInfo = await flipCoin.getBetInfo(betId);
-      expect(betInfo.houseCommit).to.equal(houseCommit);
+      expect(betInfo.houseCommitHash).to.equal(houseCommit);
     });
 
     it("Should reject commit from non-house", async function () {
@@ -176,17 +176,30 @@ describe("FlipCoinDualZK", function () {
       betId = 0;
     });
 
-    it("Should settle bet with dual ZK proof", async function () {
-      const zkProof = "0x1234"; // Placeholder
-      const expectedResult = 1; // Jugador gana
+    it("Should settle bet with dual ZK proof (house settles)", async function () {
+      // Forzar índice VRF determinista
+      await flipCoin.connect(owner).setRandomIndexForTest(betId, 137);
 
+      // Señales públicas simuladas: [playerCommit, houseCommit, bitIndex, expectedResult]
+      const pub = [
+        playerCommit,
+        houseCommit,
+        ethers.BigNumber.from(137),
+        ethers.BigNumber.from(1),
+        ethers.BigNumber.from(0)
+      ];
+      const a = [0,0];
+      const b = [[0,0],[0,0]];
+      const c = [0,0];
+
+      // La casa liquida la apuesta (tiene acceso a ambas preimágenes)
       await expect(
-        flipCoin.connect(player).settleBetWithDualZK(
+        flipCoin.connect(house).settleBetWithDualZK(
           betId,
-          playerPreimage,
-          housePreimage,
-          expectedResult,
-          zkProof
+          a,
+          b,
+          c,
+          pub
         )
       ).to.emit(flipCoin, "BetSettled");
 
@@ -195,8 +208,16 @@ describe("FlipCoinDualZK", function () {
     });
 
     it("Should reject settlement before VRF", async function () {
-      const zkProof = "0x1234";
-      const expectedResult = 1;
+      const a = [0,0];
+      const b = [[0,0],[0,0]];
+      const c = [0,0];
+      const pub = [
+        ethers.constants.HashZero,
+        ethers.constants.HashZero,
+        ethers.BigNumber.from(0),
+        ethers.BigNumber.from(1),
+        ethers.BigNumber.from(0)
+      ];
 
       // Crear nueva apuesta sin VRF
       const betAmount = ethers.utils.parseEther("0.01");
@@ -206,27 +227,23 @@ describe("FlipCoinDualZK", function () {
       const newBetId = 1;
 
       await expect(
-        flipCoin.connect(player).settleBetWithDualZK(
-          newBetId,
-          playerPreimage,
-          housePreimage,
-          expectedResult,
-          zkProof
-        )
+        flipCoin.connect(player).settleBetWithDualZK(newBetId, a, b, c, pub)
       ).to.be.revertedWith("VRF not fulfilled yet");
     });
 
     it("Should reject invalid expected result", async function () {
-      const zkProof = "0x1234";
+      const a = [0,0];
+      const b = [[0,0],[0,0]];
+      const c = [0,0];
       const invalidResult = 2; // Debe ser 0 o 1
 
       await expect(
         flipCoin.connect(player).settleBetWithDualZK(
           betId,
-          playerPreimage,
-          housePreimage,
-          invalidResult,
-          zkProof
+          a,
+          b,
+          c,
+          [playerCommit, houseCommit, ethers.BigNumber.from(137), ethers.BigNumber.from(invalidResult), ethers.BigNumber.from(0)]
         )
       ).to.be.revertedWith("Invalid expected result");
     });

@@ -19,8 +19,7 @@
   "dependencies": {
     "@chainlink/contracts": "^1.4.0",
     "@openzeppelin/contracts": "^4.9.0",
-    "circomlib": "^2.0.5",
-    "snarkjs": "^0.7.5"
+    "circomlib": "^2.0.5"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^3.0.0",
@@ -30,10 +29,12 @@
     "@types/mocha": "^9.0.0",
     "@types/node": "^16.0.0",
     "chai": "^4.3.0",
+    "circomlibjs": "^0.1.7",
     "ethereum-waffle": "^3.4.0",
     "ethers": "^5.7.0",
     "hardhat": "^2.26.3",
     "hardhat-gas-reporter": "^1.0.8",
+    "snarkjs": "^0.7.5",
     "solidity-coverage": "^0.7.21"
   }
 }

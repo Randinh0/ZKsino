@@ -1,9 +1,10 @@
 const fs = require('fs');
 const { execSync } = require('child_process');
 const path = require('path');
+const circomlibjs = require('circomlibjs');
 
 // Función para generar datos de entrada aleatorios
-function generateTestData() {
+async function generateTestData() {
     console.log('🎲 Generando datos de prueba...');
     
     // Preimágenes aleatorias de 16 elementos (512 bits total)
@@ -15,28 +16,42 @@ function generateTestData() {
         housePreimage.push(Math.floor(Math.random() * 2**32).toString());
     }
     
-    // Bit index aleatorio (0-511)
-    const bitIndex = Math.floor(Math.random() * 512).toString();
+    // Bit index (0-511). Usamos 137 por conveniencia de pruebas
+    const bitIndex = 137;
+    const wordIdx = Math.floor(bitIndex / 32);
+    const bitOff = bitIndex % 32;
     
-    // Para el circuito actual (hardcodeado para bitIndex=137)
-    const testBitIndex = "137";
+    // Calcular commits Poseidon (como BigInt decimal string)
+    const poseidon = await circomlibjs.buildPoseidon();
+    const playerCommitBI = poseidon.F.toObject(poseidon(playerPreimage.map(BigInt)));
+    const houseCommitBI = poseidon.F.toObject(poseidon(housePreimage.map(BigInt)));
+    
+    // Calcular expectedResult = XOR de los bits seleccionados (LSB-first)
+    const playerWord = BigInt(playerPreimage[wordIdx]);
+    const houseWord = BigInt(housePreimage[wordIdx]);
+    const playerBit = Number((playerWord >> BigInt(bitOff)) & 1n);
+    const houseBit = Number((houseWord >> BigInt(bitOff)) & 1n);
+    const expectedResult = (playerBit ^ houseBit).toString();
     
     // Crear input.json
     const inputData = {
-        playerPreimage: playerPreimage,
-        housePreimage: housePreimage,
-        playerCommit: "0", // Temporalmente deshabilitado
-        houseCommit: "0",  // Temporalmente deshabilitado
-        bitIndex: testBitIndex
+        playerPreimage: playerPreimage.map(String),
+        housePreimage: housePreimage.map(String),
+        playerCommit: playerCommitBI.toString(),
+        houseCommit: houseCommitBI.toString(),
+        bitIndex: bitIndex.toString(),
+        expectedResult
     };
     
     const inputPath = path.join(__dirname, '../temp/input.json');
+    fs.mkdirSync(path.join(__dirname, '../temp'), { recursive: true });
     fs.writeFileSync(inputPath, JSON.stringify(inputData, null, 2));
     
     console.log('✅ Datos generados:');
     console.log(`   Player Preimage: [${playerPreimage.slice(0, 3).join(', ')}...] (16 elementos)`);
     console.log(`   House Preimage: [${housePreimage.slice(0, 3).join(', ')}...] (16 elementos)`);
-    console.log(`   Bit Index: ${testBitIndex} (palabra ${Math.floor(parseInt(testBitIndex)/32)}, bit ${parseInt(testBitIndex)%32})`);
+    console.log(`   Bit Index: ${bitIndex} (palabra ${wordIdx}, bit ${bitOff})`);
+    console.log(`   Expected Result (XOR): ${expectedResult}`);
     console.log(`   Archivo guardado en: ${inputPath}`);
     
     return inputPath;
@@ -47,45 +62,15 @@ function compileCircuit() {
     console.log('\n🔨 Compilando circuito...');
     
     try {
-        const circuitPath = path.join(__dirname, '../circuits/flip_coin_dual_zk.circom');
-        const outputDir = path.join(__dirname, '../temp');
+        const circuitDir = path.join(__dirname, '../circuits');
         
         // Cambiar al directorio circuits para compilar
-        process.chdir(path.join(__dirname, '../circuits'));
+        process.chdir(circuitDir);
         
-        const compileCmd = `circom flip_coin_dual_zk.circom --r1cs --wasm --sym --c -l ../node_modules`;
+        const compileCmd = `circom flip_coin_dual_zk.circom --r1cs --wasm --sym -l ../node_modules`;
         console.log(`   Ejecutando: ${compileCmd}`);
         
         execSync(compileCmd, { stdio: 'inherit' });
-        
-        // Mover archivos compilados a temp/
-        const filesToMove = [
-            'flip_coin_dual_zk.r1cs',
-            'flip_coin_dual_zk.sym',
-            'flip_coin_dual_zk_js',
-            'flip_coin_dual_zk_cpp'
-        ];
-        
-        filesToMove.forEach(file => {
-            if (fs.existsSync(file)) {
-                const src = path.join(__dirname, '../circuits', file);
-                const dest = path.join(outputDir, file);
-                
-                if (fs.statSync(src).isDirectory()) {
-                    execSync(`cp -r "${src}" "${dest}"`);
-                } else {
-                    fs.copyFileSync(src, dest);
-                }
-                console.log(`   ✅ Movido: ${file}`);
-                
-                // Limpiar archivo original de circuits/
-                if (fs.statSync(src).isDirectory()) {
-                    execSync(`rm -rf "${src}"`);
-                } else {
-                    fs.unlinkSync(src);
-                }
-            }
-        });
         
         console.log('✅ Circuito compilado exitosamente');
         return true;
@@ -101,8 +86,8 @@ function generateProof(inputPath) {
     console.log('\n🔐 Generando prueba ZK...');
     
     try {
-        const wasmPath = path.join(__dirname, '../temp/flip_coin_dual_zk_js/flip_coin_dual_zk.wasm');
-        const zkeyPath = path.join(__dirname, '../zk_keys/flip_coin_dual_zk_final_0001.zkey');
+        const wasmPath = path.join(__dirname, '../circuits/flip_coin_dual_zk_js/flip_coin_dual_zk.wasm');
+    const zkeyPath = path.join(__dirname, '../zk_keys/flip_coin_dual_zk_final.zkey');
         const proofPath = path.join(__dirname, '../temp/proof.json');
         const publicPath = path.join(__dirname, '../temp/public.json');
         
@@ -166,13 +151,29 @@ function showProofStats(proofPath, publicPath) {
     }
 }
 
+// Generar calldata Solidity para (a,b,c,publicSignals)
+function generateSolidityCalldata(proofPath, publicPath) {
+  console.log('\n🧾 Generando calldata para Solidity...');
+  try {
+    const outPath = path.join(__dirname, '../temp/solidity_calldata.txt');
+    const cmd = `npx snarkjs zkey export soliditycalldata "${publicPath}" "${proofPath}"`;
+    const output = execSync(cmd, { encoding: 'utf8' });
+    fs.writeFileSync(outPath, output);
+    console.log(`   ✅ Calldata guardado en: ${outPath}`);
+    return outPath;
+  } catch (e) {
+    console.error('❌ Error generando calldata:', e.message);
+    return null;
+  }
+}
+
 // Función principal
 async function main() {
     console.log('🚀 Iniciando generación y verificación de prueba ZK\n');
     
     try {
         // 1. Generar datos de entrada
-        const inputPath = generateTestData();
+        const inputPath = await generateTestData();
         
         // 2. Compilar circuito
         if (!compileCircuit()) {
@@ -194,8 +195,10 @@ async function main() {
             process.exit(1);
         }
         
-        // 5. Mostrar estadísticas
+    // 5. Mostrar estadísticas
         showProofStats(proofFiles.proofPath, proofFiles.publicPath);
+    // 6. Calldata
+    generateSolidityCalldata(proofFiles.proofPath, proofFiles.publicPath);
         
         console.log('\n🎉 ¡Proceso completado exitosamente!');
         console.log('📁 Archivos generados en: temp/');
